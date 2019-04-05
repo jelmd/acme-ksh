@@ -1,0 +1,23 @@
+# Generated
+acme.ksh
+*.pyc
+dumps
+
+# Doc copies
+draft-ietf-acme-acme*
+rfc[0-9]+*
+*.pdf
+
+# Misc
+*.bak
+*.sav
+*.old
+.*.swp
+*.DS_Store
+*~
+.nfs*
+*.tmp
+*.rej
+*.project
+[0-9]*
+core

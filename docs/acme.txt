@@ -1,0 +1,27 @@
+# Account: user info @ACME server
+# Orders: the way to request an Account (CSR based, see RFC 2986)
+# Authorizations: State (pending|valid|invalid), whether an ACME account
+#   key holder is in control of the related cert identifier
+# Challenges: mechanism used to demonstrate the ACME account key holder’s
+#   control over the identifier a authorization refers to, allowing issuance
+#   for that identifier.
+#   Types:  HTTP-01, DNS-01, TLS-ALPN-01
+#           OOB: both not yet available
+
+https://letsencrypt.org/docs/
+https://github.com/letsencrypt/boulder/blob/master/docs/acme-divergences.md
+https://letsencrypt.org/docs/acme-protocol-updates/
+https://letsencrypt.org/docs/certificate-compatibility/
+
+https://transparencyreport.google.com/https/certificates
+
+RFC=(
+	https://tools.ietf.org/html/rfc8555
+	https://tools.ietf.org/html/draft-ietf-acme-acme-15
+	https://tools.ietf.org/html/draft-ietf-acme-acme-07
+	https://tools.ietf.org/html/draft-ietf-acme-acme-02
+)
+
+Fetch RFCs:
+==========
+for X in ${RFC[@]}; do wget -O ${X##*/}.txt ${X/html/id}.txt ; done

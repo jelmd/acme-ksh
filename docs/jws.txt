@@ -1,0 +1,214 @@
+https://tools.ietf.org/html/draft-ietf-acme-acme-07#section-6
+--------------------------------------------------------------
+- must not have the value "none" in its "alg" field
+- must not have a MAC-based algorithm in its "alg" field
+- JWS protected header must include:
+	- "alg" (Algorithm)
+		- HS256: HMAC using SHA-256 (required)
+		- HS384, HS512: HMAC using SHA-384 or SHA-512 (optional)
+		- RS256: RSASSA-PKCS1-v1_5 using SHA-256 (recommended)
+		- RS384, RS512: RSASSA-PKCS1-v1_5 using SHA-384 or SHA-512 (optional)
+		- ES256: ECDSA using P-256 and SHA-256 (recommended+)
+		- ES384, ES512: ECDSA using P-256 and SHA-384 or SHA-512 (optional)
+		- PS256, PS384, PS512: RSASSA-PSS using SHA-{256|384|512) (optional)
+		- none: No digital signature or MAC performed (optional)
+	- _either_ "jwk" (JSON Web Key) if new-account|revoke-cert request OR
+	- "kid" (key ID) otherwise
+	- "nonce" - see getNonce
+	- "url" - the URL to which this JWS object is directed
+- see also JWE: RFC 7515, 7518
+
+7.3.  Account Creation
+----------------------
+POST /acme/new-account HTTP/1.1
+   Host: example.com
+   Content-Type: application/jose+json
+
+   {
+     "protected": base64url({
+       "alg": "ES256",
+       "jwk": {...},
+       "nonce": "6S8IqOGY7eL2lsGoTZYifg",
+       "url": "https://example.com/acme/new-account"
+     }),
+     "payload": base64url({
+       "terms-of-service-agreed": true,
+       "contact": [
+         "mailto:cert-admin@example.com",
+         "tel:+12025551212"
+       ]
+     }),
+     "signature": "RZPOnYoPs1PhjszF...-nh6X1qtOFPB519I"
+   }
+
+HTTP/1.1 201 Created
+   Content-Type: application/json
+   Replay-Nonce: D8s4D2mLs8Vn-goWuPQeKA
+   Location: https://example.com/acme/acct/1
+   Link: <https://example.com/acme/some-directory>;rel="index"
+
+   {
+     "status": "valid",
+
+     "contact": [
+       "mailto:cert-admin@example.com",
+       "tel:+12025551212"
+     ]
+   }
+
+
+JWS - RFC 1715:
+===============
+JSON Web Signature (JWS):
+	data structure representing a digitally signed or MACed message.
+Javascript Object Signing and Encryption (JOSE) Header:
+	A JSON object containing the parameters describing the cryptographic
+	operations and parameters employed. Comprised of a set of Header Parameters.
+Header Parameter:
+	name/value pair that is member of the JOSE Header.
+JWS Protected Header:
+	JSON object that contains the Header Parameters that are integrity protected
+	by the JWS Signature digital signature or MAC operation. For the JWS
+	Compact Serialization, this comprises the entire JOSE Header.  For the JWS
+	JSON Serialization, this is one component of the JOSE Header.
+JWS Unprotected Header:
+	JSON object that contains the Header Parameters that are not integrity
+	protected.  This can only be present when using the JWS JSON Serialization.
+JWS Payload:
+	sequence of octets aka message to be secured
+JWS Signature:
+	Digital signature or MAC over the JWS Protected Header and the JWS Payload.
+
+
+JWS JSON Serialization (some or all of these four members):
+-----------------------------------------------------------
+{	"signatures": [
+		{	"protected": BASE64URL(UTF8(JWS Protected Header))
+			"header":    JWS Unprotected Header
+			"signature": BASE64URL(JWS Signature)
+		},
+		{	"protected": BASE64URL(UTF8(JWS Protected Header))
+			"header":    JWS Unprotected Header
+			"signature": BASE64URL(JWS Signature)
+		}...
+	],
+	"payload":   BASE64URL(JWS Payload)
+}
+
+Flattened JWS JSON Serialization (some or all of these four members):
+---------------------------------------------------------------------
+{	"protected": BASE64URL(UTF8(JWS Protected Header))
+	"header":    JWS Unprotected Header
+	"signature": BASE64URL(JWS Signature)
+	"payload":   BASE64URL(JWS Payload)
+}
+
+JWS Compact Serialization (no JWS Unprotected Header):
+-----------------------------------------------------------
+BASE64URL(UTF8(JWS Protected Header)) + '.'
++ BASE64URL(JWS Payload) + '.'
++ BASE64URL(JWS Signature)
+    
+
+
+JSON Web algorithms (JWA) - RFC 7518:
+===========================================================
+- HMAC algorithms with SHA-2 ("alg"):
+	- create a MAC of the contents of the JWS Protected Header and Payload
+
+	- HS256: HMAC using SHA-256 (required)
+	- HS384, HS512: HMAC using SHA-384 or SHA-512 (optional)
+
+- digital signatures ("alg")
+	- digitally sign the contents of the JWS Protected Header and Payload
+
+	- RS256: RSASSA-PKCS1-v1_5 using SHA-256 (recommended)
+	- RS384, RS512: RSASSA-PKCS1-v1_5 using SHA-384 or SHA-512 (optional)
+	- ES256: ECDSA using P-256 and SHA-256 (highly recommended)
+	- ES384, ES512: ECDSA using P-256 and SHA-384 or SHA-512 (optional)
+	- PS256, PS384, PS512: RSASSA-PSS using SHA-{256|384|512) (optional)
+	- none: No digital signature or MAC performed (optional)
+
+# https://gist.github.com/briansmith/2ee42439923d8e65a266994d0f70180b
+- key management ("alg"):
+	- encrypt or determine the Content Encryption Key (CEK)
+
+	- RSA1_5: RSAES-PKCS1-v1_5 with a 2048+ bit key (recommended-)
+	- RSA-OAEP: RSAES OAEP using default parameters, i.e. SHA-1 and MGF1 with
+	  SHA-1 with a 2048+ bit key (recommended+)
+	- RSA-OAEP-256: RSAES OAEP using SHA-256 and MGF1 with SHA-256 with a
+	  2048+ bit key (optional)
+	- A128KW, A256KW: AES Key Wrap with default initial value using 128|256 bit
+	  key (recommended)
+	- A192KW: AES Key Wrap with default initial value using 192bit key (optinal)
+	- dir: Direct use of a shared symmetric key as the CEK (recommended)
+	- ECDH-ES: Elliptic Curve Diffie-Hellman Ephemeral Static key agreement
+	  using Concat KDF - params: "epk","apu","apv" (recomended)
+	- ECDH-ES+A128KW, ECDH-ES+A256KW: ECDH-ES using Concat KDF and CEK wrapped
+	  with "A128KW"|"A256KW" - params: "epk","apu","apv" (recomended)
+	- ECDH-ES+A192KW: ECDH-ES using Concat KDF and CEK wrapped with "A192KW" -
+	  params: "epk","apu","apv" (optional)
+	- A128GCMKW, A192GCMKW, A256GCMKW: Key wrapping with AES GCM using a
+	  128|192|256 bit key - params: "iv","tag". (optional)
+	- PBES2-HS256+A128KW, PBES2-HS384+A192KW, PBES2-HS512+A256KW: PBES2 with
+	  HMAC SHA-{256|384|512} and "A{128|192|256}KW" wrapping -
+	  params: "p2s","p2c" (optional)
+
+	param descriptions:
+		- "epk": ephemeral public key created by the originator for the use in
+		  key agreement algorithms. Represented as a JSON Web Key [JWK] public
+		  key value. SHOULD contain only the minimum JWK parameters necessary
+		  to represent the key.
+		- "apu": base64url-enc. Agreement PartyUInfo (info about the producer)
+		- "apv": base64url-enc. Agreement PartyVInfo (info about the recipient)
+
+		- "iv": base64url-enc. Initialization Vector (must have 96 bit)
+		- "tag": base64url-enc. 128-bit Authentication Tag value resulting from
+		  the key encryption operation
+
+		- "p2s": base64url-enc. PBES2 Salt Input
+		- "p2c": positive JSON integer containing the PBKDF2 iteration count
+		  A minimum of 1000 is recommended.
+
+- content encryption ("enc", JWE):
+	- encrypt and integrity-protect the plaintext and to integrity-protect the
+	  Additional Authenticated Data (AAD).
+
+	- A128CBC-HS256, A256CBC-HS512: AES_128_CBC_HMAC_SHA_256 or
+	  AES_256_CBC_HMAC_SHA_512 authenticated encryption algorithm (required)
+	- A192CBC-HS384: AES_192_CBC_HMAC_SHA_384 authenticated enc. alg. (optional)
+	- A128GCM, A256GCM: AES GCM using {128|256} bit key (recommended)
+	- A192GCM: AES GCM using 192 bit key (optional)
+
+- keys (JSON Web Key - JWK):
+	- parameters for JWK (JSON data structure that represents a crypto key)
+
+	- "kty" (Key Type) values: 
+		- EC: Elliptic Curve (recommended+)
+			- params for public keys:
+				- "crv": "P-256"|"P-384"|"P-521"
+				- "x": base64url encoded coordinate of the EC point
+				- "y": base64url encoded coordinate of the EC point
+			- params for private keys same as for pub keys plus:
+				- "d": base64url encoded EC private key value
+		- RSA: RSA (required)
+			- params for public keys:
+				- "n": Base64urlUInt-encoded Modulus parameter
+				- "e": Base64urlUInt-encoded Exponent parameter
+			- params for private keys same as for pub keys plus:
+				- "d": Base64urlUInt-encoded Private Exponent value
+				- "p": Base64urlUInt-encoded First Prime Factor
+				- "q": Base64urlUInt-encoded Second Prime Factor
+				- "dp": Base64urlUInt-encoded First Factor CRT Exponent
+				- "dq": Base64urlUInt-encoded Second Factor CRT Exponent
+				- "qi": Base64urlUInt-encoded First CRT Coefficient
+				- "oth": other primes info - array of information about any
+					third and subsequent primes, should they exist. Otherwise
+					omit. Each array must be an object with following members:
+					- "r": Base64urlUInt-encoded Prime Factor
+					- "d": Base64urlUInt-encoded Factor CRT Exponent
+					- "t": Base64urlUInt-encoded Factor CRT Coefficient
+		- oct: Octet sequence (used to represent symmetric keys) (required)
+			- parms:
+				- "k": base64url encoded octet sequence containing the key value
+	- see also RFC 7517 (JWK)
