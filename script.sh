@@ -1,6 +1,6 @@
 #!/bin/ksh93
 
-typeset -r VERSION='1.0' LIC='[-?'"${VERSION}"' ]
+typeset -r VERSION='2.0' LIC='[-?'"${VERSION}"' ]
 [-copyright?Copyright (c) 2018 Jens Elkner. All rights reserved.]
 [-license?CDDL 1.0]'
 
@@ -14,9 +14,10 @@ typeset -r VERSION='1.0' LIC='[-?'"${VERSION}"' ]
 # Copyright 2018 Jens Elkner (jel+acme-src@cs.ovgu.de)
 
 # to get the annotation numbers right
-ACME='https://tools.ietf.org/html/draft-ietf-acme-acme-07'
+#ACME='https://tools.ietf.org/html/draft-ietf-acme-acme-07'
+ACME='https://tools.ietf.org/html/draft-ietf-acme-acme-15'
 #https://github.com/letsencrypt/boulder/commits/master/docs/acme-divergences.md
-DIVERGENCE_INFO='2018-10-10'
+DIVERGENCE_INFO='2019-03-15'
 
 # start of boiler plate
 SDIR=${.sh.file%/*}
@@ -37,13 +38,14 @@ alias json_t='typeset -usi'
 #include "includes/json.sh"
 
 unset DEFAULT ; typeset -Ar DEFAULT=(
-	[CFG-DIR]="${HOME}/.acme"
+	[CFG-DIR]="${HOME}/.acme2"
 	[PREFIX]='.well-known/acme-challenge'
 	[RESPONSE_DIR]='/data/http/sites/my_site/htdocs/.well-known/acme-challenge'
 	[ACCOUNT]='default'
 	[KEY_TYP]='P-256'
 	[KEY_TYP_DOM]='RSA256-2048'
-	[CA_NAMES]='le:https://acme-v01.api.letsencrypt.org/directory test:https://acme-staging.api.letsencrypt.org/directory'
+	[CA_NAMES]='le:https://acme-v02.api.letsencrypt.org/directory test:https://acme-staging-v02.api.letsencrypt.org/directory'
+	[CA_NAMES1]='le:https://acme-v01.api.letsencrypt.org/directory test:https://acme-staging.api.letsencrypt.org/directory'
 	[CA]='test'
 	[PORT]=0
 	[TIMEOUT]=60
@@ -248,7 +250,18 @@ Man.addFunc getConfig '' '[+NAME?getConfig - prepare the configuation to use]
 function getConfig {
 	typeset -n CFG=$1
 	typeset X T
+
 	mergeB2A CFG DEFAULT || return 1
+	if (( OPTS[API] == 1 )); then
+		CFG[CFG-DIR]="${DEFAULT[CFG-DIR]%2}"
+		CFG[CA_NAMES]="${DEFAULT[CA_NAMES1]}"
+		CFG[API]=1
+	elif [[ -n ${OPTS[API]} ]] && (( OPTS[API] != 2 )); then
+		Log.fatal "Unsupported API version '${OPTS[API]}'."
+		return 1
+	else
+		CFG[API]=2
+	fi
 	integer ERR=0 N
 
 	if [[ -n ${OPTS[LANG]} ]]; then
@@ -608,7 +621,7 @@ function getDirectory {
 		return 4
 	fi
 	JSON.getVal ${ID} PROPS
-	if [[ -n ${PROPS[newAuthz]} ]]; then
+	if [[ -n ${PROPS[newAccount]} ]]; then
 		CFG[DIR-KEY]=DIR09KEYS
 	else
 		CFG[DIR-KEY]=DIR07KEYS
@@ -1197,10 +1210,10 @@ Man.addFunc accountPrepareRequest '' '[+NAME?accountPrepareRequest - prepare acc
 '
 function accountPrepareRequest {
 	typeset -n CFG=$1 PARAMS=$2
-	typeset PH PL T URL V SFX=
+	typeset PH PL T URL V SFX= CMD_NAME="${3:-CREATE}"
 	integer L CMD
 
-	case "${3:-CREATE}" in
+	case "${CMD_NAME}" in
 		CREATE) CMD=0 ;;		# 7.3.0
 		FIND) CMD=1 ;;			# 7.3.1
 		UPDATE) CMD=2 ;;		# 7.3.2
@@ -1229,7 +1242,7 @@ function accountPrepareRequest {
 	fi
 	[[ -z ${URL} ]] && return 5	# should not happen
 
-	(( CMD < 2 || CMD == 5 )) && V=1 || V=		# force JWK
+	(( CMD < 2 || (CMD == 5 && CFG[IS_LE]) )) && V=1 || V=		# force JWK
 	prepareDefaultPH CFG PH "${URL}" $V || return 11
 
 	# payload
@@ -1267,7 +1280,12 @@ function accountPrepareRequest {
 
 		JSON.newString L "${CFG[ACCOUNT-URL]}" && return 27
 		JSON.newObject T && return 28
-		JSON.setVal $T 'account' $L 'newKey' ${CFG[PH-JWK-NEW]} || return 29
+		if (( CFG[IS_LE] )); then
+			JSON.setVal $T 'account' $L 'newKey' ${CFG[PH-JWK${SFX}]} || \
+				return 29
+		else
+			JSON.setVal $T 'account' $L 'oldKey' ${CFG[PH-JWK]} || return 29
+		fi
 		JSON.toString $T PLN || return 30
 
 		createSig CFG S PLN "${PHN}" ${SFX} || return 30
@@ -1289,7 +1307,7 @@ function accountPrepareRequest {
 		fi
 		if [[ -n ${CFG[TOS]} ]]; then
 			JSON.newTrue L && return 13
-			V+=" ${DIRKEY[tos]} $L"
+			V+=" termsOfServiceAgreed $L"
 		fi
 	elif (( CMD == 1 )); then
 		JSON.newTrue L && return 15
@@ -1305,7 +1323,9 @@ function accountPrepareRequest {
 	(( VERB )) && Log.info "Sending account request\n\t$T"
 
 	PARAMS=(
-		[URL]="${URL}" [METHOD]='POST' [DATA]="$T" [DUMP]="${URL##*/}-${CMD}" )
+		[URL]="${URL}" [METHOD]='POST' [DATA]="$T"
+		[DUMP]="${URL##*/}-${CMD_NAME}"
+	)
 }
 
 Man.addFunc newRequestBody '' '[+NAME?newRequestBody - create a new ACME request body.]
@@ -3156,11 +3176,11 @@ function doMain {
 	fi
 	if (( CMD & CMDS[base64dec] )); then
 		X="$1"
-		if ! base64url2str CFG X "$@" ; then
+		if ! base64url2str CFG X "$2" ; then
 			Log.fatal 'failed'
 			return 2
 		fi
-		[[ -z $3 ]] && print -- "$X"
+		[[ -z $2 ]] && print -- "$X"
 		return 0
 	fi
 
@@ -3234,6 +3254,7 @@ Man.addFunc MAIN '' '[+NAME?'"${PROG}"' - ACME client]
 [P:privilege]:[utility?If higher privileges are needed (e.g. when listening on a privileged port), prefix the related command with the given \autility\a. See LE_ENV:\bPFEXEC\b.]
 [R:re-auth?Ignore the current authorization status of all related domains and re-authorize if needed. SEE LE_ENV:\bFORCE_AUTH\b.]
 [U:http-util-cfg]:[path?Pass \apath\a as config file to use to the http-util. See LE_ENV:\bUTIL_CFG\b.]
+[V:api]:[num?The api version to use. Right now \b1\b and \b2\b are supported, only. This also changes the default config directory and CA-URLs to use. Default: 2]
 [X:expire]:[days?If a certificate expires in less than the given \adays\a, consider it for renewal. Only relevant with \b-c renew\b. See LE_ENV:\bDAYS\b.]
 [Z:cert-extension]:[ext?If a new certificate gets copied to the cert directory (see option \b-z \b\apath\a), use the given extension \aext\a instead off \b.crt\b. See LE_ENV:\bCERT_EXT\b.]
 [a:account]:[name?Use the account \aname\a and related config. See LE_ENV:\bACCOUNT\b.]
@@ -3326,6 +3347,7 @@ if [[ -z ${TESTING_LIB} ]]; then
 			R) OPTS[FORCE_AUTH]=1 ;;
 			S) OPTS[SRC]+=" ${OPTARG//,/ }" ;;
 			U) OPTS[UTIL_CFG]="${OPTARG}" ;;
+			V) OPTS[API]="${OPTARG}" ;;
 			X) OPTS[DAYS]="${OPTARG}" ;;
 			Z) OPTS[CERT_EXT]="${OPTARG}" ;;
 			a) OPTS[ACCOUNT]="${OPTARG}" ;;
