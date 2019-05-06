@@ -347,6 +347,7 @@ function getConfig {
 			(( ERR++ ))
 		fi
 	fi
+	checkDir ${CFG[CFG-DIR]}/${CFG[CA]} || (( ERR++ ))
 	return ${ERR}
 }
 
@@ -3156,11 +3157,11 @@ function doMain {
 	fi
 	if (( CMD & CMDS[base64dec] )); then
 		X="$1"
-		if ! base64url2str CFG X "$@" ; then
+		if ! base64url2str CFG X "$2" ; then
 			Log.fatal 'failed'
 			return 2
 		fi
-		[[ -z $3 ]] && print -- "$X"
+		[[ -z $2 ]] && print -- "$X"
 		return 0
 	fi
 
