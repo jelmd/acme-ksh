@@ -5,7 +5,7 @@ dumps
 
 # Doc copies
 draft-ietf-acme-acme*
-rfc[0-9]+*
+rfc*
 *.pdf
 
 # Misc
