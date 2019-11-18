@@ -246,8 +246,8 @@ typeset -T JSON_t=(
 	typeset -fh 'Set the value of the JSON component with the given ID (arg1) to the argument[s]] which follow: For a JSON object the arguments should be the literal property name (arg2n) and the JSON component ID (arg2n+1) of the property value. For a JSON array the arguments should be the JSON component IDs of its values. For a JSON string all arguments gets pasted literally together without any delimiter and the resulting string gets assigned to it. For a JSON number only arg2 gets assigned to it as is - no validation wrt. ECMA 404 conformance will be made. Because all other JSON components are constants, setting them results into an error, i.e. an exit code != 0. An exit code of 0 gets returned, if the given argument[s]] have been assigned as described.' setVal
 
 	function str2json {
-		[[ -z $2  ]] && return 0				# no string to convert
 		typeset -n BUF=$1 || return 1			# no write buffer
+		[[ -z $2  ]] && BUF='""' && return 0	# no string to convert
 		typeset S=$2 C T='"'
 		for (( I=0; I < ${#S}; I++ )) ; do
 			C=${S:I:1}
