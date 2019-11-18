@@ -35,6 +35,7 @@ from six.moves import urllib
 from six.moves import BaseHTTPServer
 from six.moves import StringIO
 
+PIDPATH=""
 class AcmeHTTPRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     uname = os.uname()
     server_version = ( 'acme-ksh/' + __version__
@@ -79,15 +80,18 @@ class AcmeHTTPRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                 f.close()
 
 def keep_running():
-	fp = None
-	try:
-		fp = open('sacme.exit')
-	except:
-	    return True
-	finally:
-		if fp:
-			fp.close()
-	return False
+    fp = None
+    try:
+        fp = open('../sacme.exit')
+    except:
+        return True
+    finally:
+        if fp:
+            fp.close()
+    if PIDPATH and posixpath.exists(PIDPATH):
+        return True
+
+    return False
 
 def doMain(HandlerClass = AcmeHTTPRequestHandler,
          ServerClass = BaseHTTPServer.HTTPServer):
@@ -96,7 +100,7 @@ def doMain(HandlerClass = AcmeHTTPRequestHandler,
     if sys.argv[2:]:
         HandlerClass.prefix = sys.argv[2]
     server_address = ('', int(sys.argv[3]) if sys.argv[3:] else 80)
-    PPID=os.getppid()
+    PIDPATH=posixpath.join('/proc', str(os.getppid()))
 
     httpd = ServerClass(server_address, HandlerClass)
     while keep_running():
