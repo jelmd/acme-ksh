@@ -1,7 +1,13 @@
 #!/bin/ksh93
 
 typeset -r VERSION='1.0' FPROG=${.sh.file} PROG=${FPROG##*/} SDIR=${FPROG%/*}
-typeset -r X3URL='http://cert.int-x3.letsencrypt.org/' X3NAME='letsencryptX3'
+
+# Browsers and OS often do not have the signers of LE certs in its stores
+typeset -r \
+	LE_X3URL='http://cert.int-x3.letsencrypt.org/' \
+	LE_X3NAME='Let_s_Encrypt_Authority_X3' \
+	TI_X3URL='https://www.identrust.com/node/935' \
+	TI_X3NAME='DST_Root_CA_X3'
 
 function showUsage {
 	[[ -n $1 ]] && X='-?' ||  X='--man'
@@ -34,6 +40,7 @@ function cleanup {
 }
 
 function restartSvcs {
+	[[ -z $PATH ]] && PATH='/bin:/usr/bin:/sbin:/usr/sbin' || PATH+=':/usr/sbin'
 	typeset SVCADM='svcadm' START_CMD='enable -s' STOP_CMD='disable -st' X
 	integer USE_OLD=0
 
@@ -43,13 +50,14 @@ function restartSvcs {
 		X=${ whence systemctl ; }
 		[[ -z $X ]] && USE_OLD=1 || SVCADM+=' systemctl'
 	fi
-	# or simply change this part as needed
+	# or simply change this part as needed. Stop/Start is important, because
+	# apache may crash when the cert gets changed ...
 	for X in ${OPTS[SVCS]} ; do
 		(( VERB )) && print -u2 "Restarting service '$X' ..."
 		if (( USE_OLD )); then
-			${SVCADM} service "$X" stop
+			${SVCADM} /usr/sbin/service "$X" stop
 			sleep 3
-			${SVCADM} service "$X" start
+			${SVCADM} /usr/sbin/service "$X" start
 		else
 			${SVCADM} ${STOP_CMD} "$X"
 			${SVCADM} ${START_CMD} "$X"
@@ -58,24 +66,36 @@ function restartSvcs {
 }
 
 function fetchURL {
-	typeset URL="$1" D="$2" F="${LE_TMP}/${D##*/}" H
+	typeset URL="$1" D="$2" F="${LE_TMP}/${D##*/}" H X=
 	integer LE=0 RES=1
+	typeset -a ARGS=(
+		'--capath' "${OPTS[DST]}"
+		'--silent'
+		'--show-error'
+		'--remote-time'
+		'--header' 'Expect:'
+		'--output' "$F"
+		'--dump-header' '-'
+	)
 
 	[[ -n $3 ]] && LE=1
 	(( VERB )) && print -u2 "Getting '${URL}' ..."
-	H=${ curl --capath "${OPTS[DST]}" -RsSH Expect: -o "$F" -D - "${URL}"; }
+	[[ -n ${OPTS[NOPROXY]} ]] && ARGS+=( '--noproxy' )
+	[[ -n ${OPTS[INSECURE]} ]] && ARGS+=( '--insecure' )
+	H=${ curl "${ARGS[@]}" -- "${URL}" 2>${LE_TMP}/err.out; }
 
 	if (( $? )); then
-		print -u2 "${URL} => failed to fetch" && return 1
+		H=$(<${LE_TMP}/err.out)
+		print -u2 "${URL} => error:\n$H\n" && return 1
 	elif [[ ! -s $F ]]; then
-		print -u2 "${URL} => empty response" && return 2
+		print -u2 "${URL} => empty response\n" && return 2
 	fi
 
 	H="${H#*$'\r'}"
 	set -- ${.sh.match}
 	if (( $2 != 200 )); then
 		shift 2
-		print -u2 "${URL} => " "$@"
+		print -u2 "${URL} => $@\n"
 		return 3
 	fi
 
@@ -90,19 +110,61 @@ function fetchURL {
 		RES=$?
 	fi
 	if (( RES )); then
-		print -u2 "${URL} => file not PEM encoded"
+		print -u2 "${URL} => file not PEM encoded\n"
 	elif [[ ! -e $D ]] || [[ $D -ot $F ]]; then
-		(( VERB )) && print -u2 "Overwriting '$D' ..."
+		(( VERB )) && print -u2 "Overwriting '$D' ...\n"
 		cp -p "$F" "$D" && return 0
 	elif (( VERB )); then
-		print -u2 "No update for '$D'."
+		print -u2 "No update for '$D'.\n"
 	fi
 	return 4
 }
 
+function doRehash {
+	print
+	if [[ -z ${OPTS[REHASH]} ]]; then
+		print -u2 'No rehash utility set - skipping rehash'
+		return 0
+	fi
+	cd ${OPTS[DST]} || return 1
+	${OPTS[REHASH]}
+}
+
+function getIntermediates {
+	integer UPDATE=0 C E=0
+	typeset DST X URL
+
+	for DST in LE TI ; do
+		print
+		typeset -n URL=${DST}_X3URL NAME=${DST}_X3NAME
+		[[ -n ${OPTS[NAME]} ]] && X="${OPTS[NAME]}" || X="${NAME}".crt
+		[[ -z $X ]] && print -u2 "${DST}_X3NAME is not set" && continue
+		fetchURL "${URL}" "${OPTS[DST]}/$X" 1
+		C=$?
+		(( C == 4 )) && continue
+		if (( C == 0 )); then
+			(( UPDATE++ ))
+		else
+			(( VERB )) && print -u2 '\nTrying local cert store ...'
+			# try to fetch from local cert store
+			fetchURL "${OPTS[URL]}/${NAME}".scrt "${OPTS[DST]}/$X"
+			C=$?
+			(( C == 4 )) && continue
+			(( C )) && (( E++ )) || (( UPDATE++ ))
+		fi
+		if (( C == 0 )) && [[ ${DST} == 'TI' ]]; then
+			cp "${OPTS[DST]}/$X" ${LE_TMP}/dst.p7b
+			openssl pkcs7 -in ${LE_TMP}/dst.p7b -inform DER -print_certs \
+				-out ${LE_TMP}/dst.crt && cp ${LE_TMP}/dst.crt "${OPTS[DST]}/$X"
+		fi
+	done
+	(( E)) && print -u2 'Perhaps using option -i may help to workaround.'
+	(( UPDATE )) && return 0 || return 1
+}
+
 function doMain {
 	typeset X F D URL H
-	integer UPDATE
+	integer UPDATE=0 C
 
 	(( ! OPTS[LEX] )) && [[ -z $1 ]] && showUsage 1 && return 0
 
@@ -112,12 +174,20 @@ function doMain {
 	LE_TMP=${ mktemp -dt acme.XXXXXX ; }
 	[[ -z ${LE_TMP} ]] && return 1
 
-	(( OPTS[LEX] )) && fetchURL "${X3URL}" "${OPTS[DST]}/${X3NAME}".crt 1
+	if [[ -n ${OPTS[NAME]} ]]; then
+		if [[ ! ${OPTS[NAME]} =~ ^[a-zA-Z0-9._@][-+a-zA-Z0-9._@]*$ ]]; then
+			print -u2 "Invalid characters in '${OPTS[NAME]}' - exiting."
+			return 2
+		fi
+	fi
+	(( OPTS[LEX] )) && getIntermediates && (( REHASH++ ))
 
 	for X in "$@" ; do
 		[[ -z $X ]] && continue
-		fetchURL "${OPTS[URL]}/$X".crt "${OPTS[DST]}/$X".crt
+		[[ -n ${OPTS[NAME]} ]] && D="${OPTS[NAME]}" || D="$X".crt
+		fetchURL "${OPTS[URL]}/$X".crt "${OPTS[DST]}/$D" && (( UPDATE++ ))
 	done
+	(( UPDATE | REHASH )) && doRehash
 	(( UPDATE )) && restartSvcs
 }
 
@@ -125,23 +195,26 @@ USAGE="[-?${VERSION}"' ]
 [-copyright?Copyright (c) 2019 Jens Elkner. All rights reserved.]
 [-license?CDDL 1.0]
 [+NAME?'"${PROG}"' - update LE certificates and restart related services.]
-[+DESCRIPTION?Download the certificates \aURL\a\b/\b\adomain\a\b.crt\b and copy the file with the same name to the given certificate directory if it is newer than the existing file with the same name or the file does not yet exist. If copied, the rehash utility gets called to update hash-symlinks to the related certificates. Finally related services get restarted.]
+[+DESCRIPTION?Download the certificate \aURL\a\b/\b\adomain\a\b.crt\b and copy the file with the same name to the given certificate directory if it is newer than the existing file with the same name or the file does not yet exist. If copied, the rehash utility gets called to update hash-symlinks to the related certificates. Finally related services get restarted.]
 [h:help?Print this help and exit.]
 [F:functions?Print a list of all functions available.]
 [T:trace]:[functionList?A comma separated list of functions of this script to trace (convinience for troubleshooting).] 
 [+?]
 [d:dir]:[path?The directory, where the new certificates should be stored. Default: '"${DEFAULT[DST]}"']
+[i:insecure?Do not verify SSL certificates presented by any server. For more information see \bcurl\b(1) flag \b--insecure\b.]
+[n:name]:[fname?Store the received cert using the \afname\a as its basename instead of \adomain\a\b.crt\b . If more than one domain is given, all certs will be stored under the same name, yes!]
+[P:no-proxy?Disable the use of any proxy. Per default a proxy is used, if configured - see \bcurl\b(1) for more information.]
 [r:rehash]:[path?The \apath\a to the utility, which should be called from within the certificate directory to update the hashed symlinks to related certificates. Default: '"${DEFAULT[REHASH]}"']
 [s:svc]:[name?If a certificate update happend, restart the service with the given \aname\a. For this on Solaris \bsvcadm\b(1M) otherwise \bsystemctl\b(8) will be used. Can be used multiple times. Default: '"${DEFAULT[SVCS]}"']
 [u:url]:[URL?The download \aURL\a, which points to the directory containing re-newed certificates. Default: '"${DEFAULT[URL]}"']
 [v:verbose?Just show the annoying details.]
-[x:x3cert?Try to download the current \b'"Let's Encrypt Authority X3"'\b certificate, convert it into PEM format and save it in the certificate directory as \b'"${X3NAME}"'.crt\b. An update does not trigger a rehash or service restart.]
+[x:x3cert?Try to download the certificates of intermediate and root CAs.  An update does not automatically trigger a service restart.]
 [+EXAMPLES?]{
-	[+?'"${PROG}"' \a'"${HOSTNAME}"'\a \b'"${X3NAME}"']
+	[+?'"${PROG}"' \a'"${HOSTNAME}"'\a \b'"${LE_X3NAME}"']
 	[+?]
 	[+?'"${PROG}"' -d \a/data/web/httpd/conf/ssl.crt\a \\]
-	[+?-u http://\a'"le.${HOSTNAME#*.}"'/certs\a -s apache2 \\]
-	[+?\a'"le.${HOSTNAME#*.}"'\a]
+	[+? -u http://\a'"le.${HOSTNAME#*.}"'/certs\a -s apache2 \\]
+	[+? -i \a'"le.${HOSTNAME#*.}"'\a]
 	[+?]
 	[+?'"${PROG}"' -d /tmp -x]
 }
@@ -160,6 +233,9 @@ while getopts "${X}" OPT ; do
 			;;
 		F) typeset +f && exit 0 ;;
 		d) OPTS[DST]="${OPTARG}" ;;
+		i) OPTS[INSECURE]=1 ;;
+		n) OPTS[NAME]="${OPTARG}" ;;
+		P) OPTS[NOPROXY]=1 ;;
 		r) OPTS[REHASH]="${OPTARG}" ;;
 		s) OPTS[SVCS]+=" ${OPTARG//,/ }" ;;
 		u) OPTS[URL]="${OPTARG}" ;;
