@@ -56,7 +56,11 @@ or e.g. on Linux
 
 On any other webserver
 ======================
-Redirect /.well-known/acme-challenge/ to the webserver above with the same path.
+Redirect /.well-known/acme-challenge/ an every host you wanna get a certificate
+for to the webserver above with the same path, e.g. using apache httpd, nginx,
+or anything else, which listens on port 80 and is able to answer such request
+with a redirect.
+
 E.g. on Apache httpd one may add the following snippet to the [virtual] site
 config:
 ```
@@ -138,21 +142,21 @@ If you do not have the luxury to host a Solaris 11+ or Illumos based machine, yo
 
 acme.ksh:
 ---------
-acme-ksh stores per all management data incl. unencrypted private keys in the
-config directory, which defaults to `~/.acme/`. It gets created on the first use
+acme-ksh stores all management data incl. unencrypted private keys in the
+config directory, which defaults to `~/.acme2/`. It gets created on the first use
 automagically. So e.g. the first thing to do is, to see the inital config and
 secure it as needed:
 
 ```
 acme.ksh -c config
-chmod 700 ~/.acme
+chmod 700 ~/.acme2
 ```
 
 Make sure, only authorized persons have access to this directory (or the
 directory you decided to use instead of it). Sharing this to other machines
 is not recommended at all! Keep it secure!
 
-You can customize the defaults by creating a `~/.acme/le.conf` file and add the
+You can customize the defaults by creating a `~/.acme2/le.conf` file and add the
 desired key=value pairs (it gets handled as ksh snippet, so you can make use
 of its features, but that's rarely needed). For more information see:
 
@@ -165,7 +169,7 @@ acme.ksh -H getConfig		# for implementation details
 So lets customize:
 
 ```
-cat >~/.acme/le.conf<<EOF
+cat >~/.acme2/le.conf<<EOF
 RESPONSE_DIR='/net/webserver/data/letsencrypt/answers'
 CERT_DIR='/net/webserver/data/letsencrypt/certs'
 CA='le'		# use the production site instead of 'test' by default
@@ -196,9 +200,9 @@ acme.ksh -c cert -d www.my.do.main,www2.my.do.main,www3.my.do.main
 Note that certificate related information get stored in the config directory
 under `r-www.my.do.main.*` and domain specific data under `d-${domain}.*` .
 
-So on success you should have a `~/.acme/le/r-www.my.do.main.crt` - the SSL
+So on success you should have a `~/.acme2/le/r-www.my.do.main.crt` - the SSL
 Certificate alias "public key" for your application. Furthermore there should
-be a `~/.acme/le/r-www.my.do.main.key` - the per default unencrypted private
+be a `~/.acme2/le/r-www.my.do.main.key` - the per default unencrypted private
 key for your certificate. Both are PEM encoded. You need to copy both files to
 the appropriate places, possibly  the certificate to
 `/etc/ssl/certs/www-my-do-main.crt` and the private key to
