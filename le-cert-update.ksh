@@ -44,6 +44,10 @@ function restartSvcs {
 	typeset SVCADM='svcadm' START_CMD='enable -s' STOP_CMD='disable -st' X
 	integer USE_OLD=0
 
+	for X in ${OPTS[SCRIPTS]} ; do
+		$X
+	done
+
 	if [[ ${ uname -s ; } != 'SunOS' ]]; then
 		SVCADM=${ whence + ; }		# one may replace '+' with 'sudo'
 		START_CMD='start'  STOP_CMD='stop'
@@ -80,35 +84,49 @@ function fetchURL {
 
 	[[ -n $3 ]] && LE=1
 	(( VERB )) && print -u2 "Getting '${URL}' ..."
-	[[ -n ${OPTS[NOPROXY]} ]] && ARGS+=( '--noproxy' )
-	[[ -n ${OPTS[INSECURE]} ]] && ARGS+=( '--insecure' )
-	H=${ curl "${ARGS[@]}" -- "${URL}" 2>${LE_TMP}/err.out; }
 
-	if (( $? )); then
-		H=$(<${LE_TMP}/err.out)
-		print -u2 "${URL} => error:\n$H\n" && return 1
-	elif [[ ! -s $F ]]; then
-		print -u2 "${URL} => empty response\n" && return 2
-	fi
-
-	H="${H#*$'\r'}"
-	set -- ${.sh.match}
-	if (( $2 != 200 )); then
-		shift 2
-		print -u2 "${URL} => $@\n"
-		return 3
-	fi
-
-	if (( LE )); then
-		H="${F%.crt}.der"
-		mv "$F" "$H"
-		openssl x509 -in "$H" -inform DER -outform PEM -out "$F" 2>/dev/null
-		RES=$?
-		touch -r "$H" "$F"
+	if [[ ${URL:0:5} == 'file:' ]]; then
+		(( LE )) && print -u2 "URL '${URL}' not allowed for LE." && return 1
+		F=${URL:5}
+		F=/${F##/}
+		if [[ ! -e $F ]]; then
+			(( VERB )) && print -u2 "No update for '$D'.\n"
+			return 4
+		fi
+		RES=0
 	else
-		openssl x509 -in "$F" -outform DER -out "${F%.crt}.der" 2>/dev/null
-		RES=$?
+		# http:
+		[[ -n ${OPTS[NOPROXY]} ]] && ARGS+=( '--noproxy' )
+		[[ -n ${OPTS[INSECURE]} ]] && ARGS+=( '--insecure' )
+		H=${ curl "${ARGS[@]}" -- "${URL}" 2>${LE_TMP}/err.out; }
+
+		if (( $? )); then
+			H=$(<${LE_TMP}/err.out)
+			print -u2 "${URL} => error:\n$H\n" && return 1
+		elif [[ ! -s $F ]]; then
+			print -u2 "${URL} => empty response\n" && return 2
+		fi
+
+		H="${H#*$'\r'}"
+		set -- ${.sh.match}
+		if (( $2 != 200 )); then
+			shift 2
+			print -u2 "${URL} => $@\n"
+			return 3
+		fi
+
+		if (( LE )); then
+			H="${F%.crt}.der"
+			mv "$F" "$H"
+			openssl x509 -in "$H" -inform DER -outform PEM -out "$F" 2>/dev/null
+			RES=$?
+			touch -r "$H" "$F"
+		else
+			openssl x509 -in "$F" -outform DER -out "${F%.crt}.der" 2>/dev/null
+			RES=$?
+		fi
 	fi
+
 	if (( RES )); then
 		print -u2 "${URL} => file not PEM encoded\n"
 	elif [[ ! -e $D ]] || [[ $D -ot $F ]]; then
@@ -205,8 +223,9 @@ USAGE="[-?${VERSION}"' ]
 [n:name]:[fname?Store the received cert using the \afname\a as its basename instead of \adomain\a\b.crt\b . If more than one domain is given, all certs will be stored under the same name, yes!]
 [P:no-proxy?Disable the use of any proxy. Per default a proxy is used, if configured - see \bcurl\b(1) for more information.]
 [r:rehash]:[path?The \apath\a to the utility, which should be called from within the certificate directory to update the hashed symlinks to related certificates. Default: '"${DEFAULT[REHASH]}"']
-[s:svc]:[name?If a certificate update happend, restart the service with the given \aname\a. For this on Solaris \bsvcadm\b(1M) otherwise \bsystemctl\b(8) will be used. Can be used multiple times. Default: '"${DEFAULT[SVCS]}"']
-[u:url]:[URL?The download \aURL\a, which points to the directory containing re-newed certificates. Default: '"${DEFAULT[URL]}"']
+[S:script]:[path?If a certificate update happend, run the script \apath\a before all related services get restarted. Can be used multiple times. Per default the list of scripts to run is empty.]
+[s:svc]:[name?If a certificate update happend, restart the service with the given \aname\a. If \aname\a is an empty string, no service gets restarted. The executing user should have the related permissions for \bsvcadm\b(1M) on Solaris, for \bsystemctl\b(8) otherwise. Can be used multiple times. Default: '"${DEFAULT[SVCS]}"']
+[u:url]:[URL?The download \aURL\a, which points to the directory containing re-newed certificates. If the URL starts with \bfile:\b, the remaining part gets used as the directory to look for new re-newed certificates. Default: '"${DEFAULT[URL]}"']
 [v:verbose?Just show the annoying details.]
 [x:x3cert?Try to download the certificates of intermediate and root CAs.  An update does not automatically trigger a service restart.]
 [+EXAMPLES?]{
@@ -237,6 +256,7 @@ while getopts "${X}" OPT ; do
 		n) OPTS[NAME]="${OPTARG}" ;;
 		P) OPTS[NOPROXY]=1 ;;
 		r) OPTS[REHASH]="${OPTARG}" ;;
+		S) OPTS[SCRIPTS]+=" ${OPTARG//,/ }" ;;
 		s) OPTS[SVCS]+=" ${OPTARG//,/ }" ;;
 		u) OPTS[URL]="${OPTARG}" ;;
 		v) VERB=1 ;;

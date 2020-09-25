@@ -407,7 +407,7 @@ function checkBinaries {
 			'solve this problem.' && (( ERR++ ))
 	fi
 	(( ERR == 0 )) && CFG[OPENSSL]="${OPENSSL}"
-	if [[ ${ uname -s ; } ]]; then
+	if [[ ${ uname -s ; } == 'SunOS' ]]; then
 		X=${ whence -p gsed ; }
 		[[ -z $X ]] && Log.fatal 'gsed (GNU sed) is required but was not' \
 			'found. You may install it or adjust your \bPATH\b env var to' \
@@ -434,7 +434,7 @@ function checkBinaries {
 		fi
 	else
 		for X in curl wget ; do
-			TOOL=${ whence curl; }
+			TOOL=${ whence $X ; }
 			[[ -n ${TOOL} ]] && break
 		done
 	fi
@@ -451,7 +451,7 @@ function checkBinaries {
 		CFG[AGENT]+=')'
 	else
 		Log.fatal 'No of the http-utils curl or wget found. You may' \
-			'install one of them or adjust your \bPATH\b env var to solve' \
+			'install one of them or adjust your PATH env var to solve' \
 			'this problem.'
 		(( ERR++ ))
 	fi
