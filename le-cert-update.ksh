@@ -4,9 +4,9 @@ typeset -r VERSION='1.0' FPROG=${.sh.file} PROG=${FPROG##*/} SDIR=${FPROG%/*}
 
 # Browsers and OS often do not have the signers of LE certs in its stores
 typeset -r \
-	LE_X3URL='http://cert.int-x3.letsencrypt.org/' \
-	LE_X3NAME='Let_s_Encrypt_Authority_X3' \
-	TI_X3URL='https://www.identrust.com/node/935' \
+	LE_X3URL='http://r3.i.lencr.org/' \
+	LE_X3NAME='R3' \
+	TI_X3URL='http://apps.identrust.com/roots/dstrootcax3.p7c' \
 	TI_X3NAME='DST_Root_CA_X3'
 
 function showUsage {
@@ -116,10 +116,18 @@ function fetchURL {
 		fi
 
 		if (( LE )); then
+			[[ $H =~ 'Content-Type: application/pkcs7-mime' ]] && LE=0
 			H="${F%.crt}.der"
 			mv "$F" "$H"
-			openssl x509 -in "$H" -inform DER -outform PEM -out "$F" 2>/dev/null
-			RES=$?
+			if (( LE )); then
+				openssl x509 -in "$H" -inform DER -outform PEM -out "$F" \
+					2>/dev/null
+				RES=$?
+			else
+				openssl pkcs7 -in "$H" -inform DER -print_certs -out "$F" \
+					2>/dev/null
+				RES=$?
+			fi
 			touch -r "$H" "$F"
 		else
 			openssl x509 -in "$F" -outform DER -out "${F%.crt}.der" 2>/dev/null
@@ -169,11 +177,6 @@ function getIntermediates {
 			C=$?
 			(( C == 4 )) && continue
 			(( C )) && (( E++ )) || (( UPDATE++ ))
-		fi
-		if (( C == 0 )) && [[ ${DST} == 'TI' ]]; then
-			cp "${OPTS[DST]}/$X" ${LE_TMP}/dst.p7b
-			openssl pkcs7 -in ${LE_TMP}/dst.p7b -inform DER -print_certs \
-				-out ${LE_TMP}/dst.crt && cp ${LE_TMP}/dst.crt "${OPTS[DST]}/$X"
 		fi
 	done
 	(( E)) && print -u2 'Perhaps using option -i may help to workaround.'

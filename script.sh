@@ -2662,7 +2662,7 @@ function getCert {
 	invalidatePrivKeys CFG '-TMP'	# make sure, we get no "cached" key[file]
 	getPrivateKey CFG '-TMP' || return 4
 	KFILE="${CFG[KEY-FILE-TMP]}"
-	if [[ -n ${AUTHZ[CERT]} ]]; then
+	if [[ -n ${AUTHZ[CERT]} ]] && ! (( AUTHZ[EXPIRED] )); then
 		saveCert CFG ${AUTHZ[CERT]} "${KFILE%key}crt"
 		return $?
 	fi
