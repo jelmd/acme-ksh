@@ -279,8 +279,6 @@ typeset -T JSON_t=(
 				T+='\"'
 			elif [[ $C == '\' ]]; then
 				T+='\\'
-			elif [[ $C == '/' ]]; then
-					T+='\/'
 			else
 				T+="$C"
 			fi
